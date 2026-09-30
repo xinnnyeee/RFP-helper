@@ -104,7 +104,7 @@ body{overflow-x:hidden}
   <section class="card">
     <h2>1 · Payee</h2>
     <div class="grid">
-      <div><label>Staff / Student / Vendor Number <span class="req">*</span></label><input id="staffNo" autocomplete="off"></div>
+      <div><label>Staff / Student / Vendor Number <span class="req">*</span></label><input id="staffNo" autocomplete="off" placeholder="E0123456" maxlength="8" autocapitalize="characters" spellcheck="false" style="text-transform:uppercase"><div class="hint">E followed by 7 digits</div></div>
       <div style="grid-column:span 2"><label>Payee's Name (as per bank records) <span class="req">*</span></label><input id="payee" style="text-transform:uppercase"></div>
       <div><label>Payment Currency</label><input id="currency" value="SGD"></div>
     </div>
@@ -137,10 +137,11 @@ body{overflow-x:hidden}
   </section>
 
   <section class="card">
-    <h2>3 · Approval &amp; preparer</h2>
+    <h2>3 · Preparer &amp; event</h2>
     <div class="grid">
       <div><label>Prepared by (name)</label><input id="preparer" placeholder="defaults to payee name"></div>
       <div><label>Prepared date <span class="req">*</span></label><input id="prepDate" type="date"></div>
+      <div><label>Event date <span class="req">*</span></label><input id="eventDate" type="date"><div class="hint" id="eventDateShow">Used in the file name</div></div>
     </div>
   </section>
 
@@ -185,6 +186,7 @@ const GST_OPTIONS = [["I9","9% Std Rated"],["IE","Not Taxable - exempt"],["IZ","
 const GL_HINT = {"7100103":"Consumables","7500106":"Meals & Refreshments","7700701":"Miscellaneous Expenses"};
 const GST_HINT = {"I9":"Purchases from locally GST-registered suppliers","IE":"Purchases from non-GST-registered suppliers","IZ":"Purchases from locally GST-registered suppliers, but services performed are not taxable"};
 const WBS = "E-510-00-0080-03";
+const STAFF_RE = /^E\d{7}$/i;
 const MAX_ENTRIES = 10;
 const $ = id => document.getElementById(id);
 let entries = []; let uid = 0;
@@ -310,7 +312,9 @@ function validate(){
   const errs = [];
   document.querySelectorAll('.invalid').forEach(x=>x.classList.remove('invalid'));
   const need = (id,label)=>{ if(!$(id).value.trim()){ $(id).classList.add('invalid'); errs.push(label+' is required.'); } };
-  need('staffNo','Staff / Student / Vendor Number'); need('payee',"Payee's name"); need('purpose','Purpose'); need('prepDate','Prepared date');
+  need('staffNo','Staff / Student / Vendor Number'); need('payee',"Payee's name"); need('purpose','Purpose'); need('prepDate','Prepared date'); need('eventDate','Event date');
+  const sn = $('staffNo').value.trim();
+  if(sn && !STAFF_RE.test(sn)){ $('staffNo').classList.add('invalid'); errs.push('Staff / Student Number should look like E0123456 (E followed by 7 digits).'); }
   if(!entries.length) errs.push('Add at least one spending entry.');
   entries.forEach((e,i)=>{
     const el = document.querySelector(`.entry[data-id="${e.id}"]`);
@@ -330,6 +334,14 @@ function wrap(font, text, size, maxW){
   const words = text.split(/\s+/); const lines=[]; let cur='';
   for(const w of words){ const t = cur? cur+' '+w : w; if(font.widthOfTextAtSize(t,size)<=maxW || !cur) cur=t; else { lines.push(cur); cur=w; } }
   if(cur) lines.push(cur); return lines;
+}
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtDateLong(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${d} ${MONTHS[+m-1]} ${y}`; }  // 13 Sep 2026
+function fileName(){
+  const clean = t => t.replace(/[\\/:*?"<>|\u0000-\u001f]/g,'').replace(/\s+/g,' ').trim();
+  const name = clean($('payee').value.toUpperCase());
+  const amt = '$' + totalAmt().toFixed(2);   // no thousands separator: commas already split the fields
+  return `RFP - ${name}, ${amt}, ${fmtDateLong($('eventDate').value)}.pdf`;
 }
 function fmtDate(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
 // Sanitise to WinAnsi (standard fonts can't encode everything)
@@ -433,9 +445,7 @@ $('generate').onclick = async ()=>{
     const bytes = await buildPdf();
     if(lastUrl) URL.revokeObjectURL(lastUrl);
     lastUrl = URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
-    const d = ($('prepDate').value||new Date().toISOString().slice(0,10)).replace(/-/g,'');
-    const slug = $('purpose').value.trim().replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'').slice(0,40);
-    const a = $('download'); a.href=lastUrl; a.download=`RFP_${d}_${slug||'claim'}.pdf`; a.style.display='';
+    const a = $('download'); a.href=lastUrl; a.download=fileName(); a.style.display='';
     const fname = a.download; lastFile = new File([bytes], fname, {type:'application/pdf'});
     // Phones can't show a PDF inside the page reliably, so offer Open / Share instead of the inline preview
     const pv = $('preview');
@@ -448,10 +458,11 @@ $('generate').onclick = async ()=>{
   finally{ $('generate').disabled=false; setStatus(''); }
 };
 $('addEntry').onclick = ()=>{ if(entries.length<MAX_ENTRIES){ entries.push(newEntry(entries[entries.length-1])); renderEntries(); } };
-$('reset').onclick = ()=>{ if(!confirm('Clear all entries and receipts?')) return; entries=[newEntry()]; $('purpose').value=''; renderEntries(); ['preview','download','share','openPdf'].forEach(id=>$(id).style.display='none'); $('msg').className='msg'; };
+$('reset').onclick = ()=>{ if(!confirm('Clear all entries and receipts?')) return; entries=[newEntry()]; $('purpose').value=''; $('eventDate').value=''; $('eventDateShow').textContent='Used in the file name'; renderEntries(); ['preview','download','share','openPdf'].forEach(id=>$(id).style.display='none'); $('msg').className='msg'; };
 $('currency').addEventListener('input', updateTotal);
 $('payee').addEventListener('input', ()=>$('payee').classList.remove('invalid'));
-['staffNo','purpose'].forEach(id=>$(id).addEventListener('input',()=>$(id).classList.remove('invalid')));
+['staffNo','purpose','eventDate','prepDate'].forEach(id=>$(id).addEventListener('input',()=>$(id).classList.remove('invalid')));
+$('eventDate').addEventListener('input',()=>{ const v=$('eventDate').value; $('eventDateShow').textContent = v? fmtDateLong(v) : 'Used in the file name'; });
 
 function saveProfile(){
   if(!$('remember').checked){ store.set({remember:false}); return; }
